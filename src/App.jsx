@@ -364,7 +364,7 @@ export default function App() {
       <div className="background-layer" style={{ "--app-background": `url(${appBackground})` }} />
       <div className="background-grid" />
 
-      <section className="game-shell">
+      <section className={`game-shell ${phase === "debate" ? "full-bleed" : ""}`}>
         {phase === "scenario" ? (
           <ScenarioScreen
             operatorLabel={operatorLabel}

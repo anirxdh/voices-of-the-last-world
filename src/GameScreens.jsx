@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AGENTS } from "./simulator.js";
 
 function summarizeStrength(agent) {
@@ -13,27 +13,58 @@ function summarizeWeakness(agent) {
 }
 
 export function BackgroundAudioControls({ bgmMuted, bgmVolume, onToggleMute, onVolumeChange }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event) => {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(event.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
   return (
-    <div className="bgm-audio-controls">
+    <div className={`bgm-audio-controls ${open ? "open" : ""}`} ref={containerRef}>
       <button
         type="button"
         className="bgm-audio-button"
-        onClick={onToggleMute}
-        aria-label={bgmMuted ? "Unmute background music" : "Mute background music"}
-        title={bgmMuted ? "Unmute background music" : "Mute background music"}
+        onClick={() => setOpen((value) => !value)}
+        aria-label={open ? "Close volume controls" : "Open volume controls"}
+        aria-expanded={open}
+        title={open ? "Close volume controls" : "Open volume controls"}
       >
         {bgmMuted ? "🔇" : "🔊"}
       </button>
-      <input
-        className="bgm-volume-slider"
-        type="range"
-        min="0"
-        max="0.12"
-        step="0.005"
-        value={bgmVolume}
-        onChange={onVolumeChange}
-        aria-label="Background music volume"
-      />
+      {open ? (
+        <div className="bgm-audio-panel" role="group" aria-label="Background music controls">
+          <button
+            type="button"
+            className="bgm-mute-toggle"
+            onClick={onToggleMute}
+            aria-label={bgmMuted ? "Unmute background music" : "Mute background music"}
+            title={bgmMuted ? "Unmute background music" : "Mute background music"}
+          >
+            {bgmMuted ? "Unmute" : "Mute"}
+          </button>
+          <input
+            className="bgm-volume-slider"
+            type="range"
+            min="0"
+            max="0.12"
+            step="0.005"
+            value={bgmVolume}
+            onChange={onVolumeChange}
+            aria-label="Background music volume"
+          />
+          <button type="button" className="bgm-panel-close" onClick={() => setOpen(false)} aria-label="Close volume controls">
+            ×
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -94,9 +125,6 @@ export function ScenarioScreen({ operatorLabel, currentScenario, scenarioIndex, 
         <p className="selection-kicker">{operatorLabel}</p>
         <h2 className="scenario-heading">Select The Scenario</h2>
         <div className="scenario-selector" role="list" aria-label="Scenario selection">
-          <button type="button" className="scenario-nav-button" onClick={() => onMoveScenario(-1)} aria-label="Previous scenario">
-            ‹
-          </button>
           <button
             type="button"
             className="scenario-chip active scenario-chip-carousel"
@@ -110,9 +138,14 @@ export function ScenarioScreen({ operatorLabel, currentScenario, scenarioIndex, 
               <span>{currentScenario.scenario_description}</span>
             </span>
           </button>
-          <button type="button" className="scenario-nav-button" onClick={() => onMoveScenario(1)} aria-label="Next scenario">
-            ›
-          </button>
+          <div className="scenario-selector-nav" aria-label="Scenario navigation">
+            <button type="button" className="scenario-nav-button" onClick={() => onMoveScenario(-1)} aria-label="Previous scenario">
+              ‹
+            </button>
+            <button type="button" className="scenario-nav-button" onClick={() => onMoveScenario(1)} aria-label="Next scenario">
+              ›
+            </button>
+          </div>
         </div>
         <div className="bottom-actions stretch">
           <button type="button" className="primary-button" onClick={onContinue}>
@@ -139,18 +172,24 @@ export function SelectionScreen({ operatorLabel, selectedScenario, roster, selec
           const selected = selectedAgents.includes(character.name);
           const previewing = hoveredCharacter === character.name && character.video;
           return (
-            <button
+            <article
               key={character.name}
-              type="button"
               className={`character-card ${selected ? "selected" : ""}`}
               style={{ "--accent": AGENTS[character.name].color }}
-              onClick={() => onToggleAgent(character.name)}
-              onMouseEnter={() => onHoverCharacter(character.name)}
-              onMouseLeave={onBlurCharacter}
-              onFocus={() => onHoverCharacter(character.name)}
-              onBlur={onBlurCharacter}
             >
               <div className="character-frame">
+                <button
+                  type="button"
+                  className="character-card-hit"
+                  aria-pressed={selected}
+                  onClick={() => onToggleAgent(character.name)}
+                  onMouseEnter={() => onHoverCharacter(character.name)}
+                  onMouseLeave={onBlurCharacter}
+                  onFocus={() => onHoverCharacter(character.name)}
+                  onBlur={onBlurCharacter}
+                >
+                  <span className="sr-only">{selected ? "Deselect" : "Select"} {character.name}</span>
+                </button>
                 {previewing ? (
                   <video
                     key={character.video}
@@ -173,14 +212,17 @@ export function SelectionScreen({ operatorLabel, selectedScenario, roster, selec
               <div className="character-card-copy">
                 <h3>{character.name}</h3>
                 <p className="character-role">{agent.role}</p>
-                <p className="character-trait">
-                  <strong>Strong:</strong> {summarizeStrength(agent)}
-                </p>
-                <p className="character-trait character-trait-risk">
-                  <strong>Risk:</strong> {summarizeWeakness(agent)}
-                </p>
+                <details className="character-details">
+                  <summary>Details</summary>
+                  <p className="character-trait">
+                    <strong>Strong:</strong> {summarizeStrength(agent)}
+                  </p>
+                  <p className="character-trait character-trait-risk">
+                    <strong>Risk:</strong> {summarizeWeakness(agent)}
+                  </p>
+                </details>
               </div>
-            </button>
+            </article>
           );
         })}
       </div>
@@ -230,30 +272,45 @@ export function DebateScreen({
   getRosterEntry,
   browserFallback
 }) {
+  const leftCard = getRosterEntry(activeDebateRoster[0]);
+  const rightCard = getRosterEntry(activeDebateRoster[1]);
+
   return (
     <section className="debate-panel debate-panel-scenario" style={{ "--discussion-image": `url(${selectedScenario.backdrop})` }}>
       <div className="debate-stage">
-        <DebatePortrait
-          agentName={activeDebateRoster[0]}
-          card={getRosterEntry(activeDebateRoster[0])}
-          speaking={activeLine?.speaker === activeDebateRoster[0]}
-        />
+        <DebatePortrait agentName={activeDebateRoster[0]} card={leftCard} speaking={activeLine?.speaker === activeDebateRoster[0]} />
         <div className="debate-thread debate-thread-centered">
           {debateMessages.map((message, index) => {
             const side = message.speaker === activeDebateRoster[0] ? "left" : "right";
+            const card = side === "left" ? leftCard : rightCard;
             return (
               <div key={`${message.speaker}-${index}`} className={`chat-row ${side}`}>
+                {side === "left" ? (
+                  <div className="chat-avatar" style={{ "--accent": AGENTS[message.speaker].color }}>
+                    <img src={card?.poster ?? card?.image} alt={message.speaker} />
+                  </div>
+                ) : null}
                 <div className={`chat-bubble ${side}`}>
                   <div className="dialogue-speaker" style={{ color: AGENTS[message.speaker].color }}>
                     {message.speaker}
                   </div>
                   <div className="dialogue-text dialogue-text-message">{message.text}</div>
                 </div>
+                {side === "right" ? (
+                  <div className="chat-avatar" style={{ "--accent": AGENTS[message.speaker].color }}>
+                    <img src={card?.poster ?? card?.image} alt={message.speaker} />
+                  </div>
+                ) : null}
               </div>
             );
           })}
           {showActiveTypingBubble && activeLine ? (
             <div className={`chat-row ${activeLine.speaker === activeDebateRoster[0] ? "left" : "right"}`}>
+              {activeLine.speaker === activeDebateRoster[0] ? (
+                <div className="chat-avatar live" style={{ "--accent": AGENTS[activeLine.speaker].color }}>
+                  <img src={leftCard?.poster ?? leftCard?.image} alt={activeLine.speaker} />
+                </div>
+              ) : null}
               <div className={`chat-bubble typing ${activeLine.speaker === activeDebateRoster[0] ? "left" : "right"}`}>
                 <div className="dialogue-speaker" style={{ color: AGENTS[activeLine.speaker].color }}>
                   {activeLine.speaker}
@@ -263,14 +320,15 @@ export function DebateScreen({
                   <span className="dialogue-caret" aria-hidden="true" />
                 </div>
               </div>
+              {activeLine.speaker === activeDebateRoster[1] ? (
+                <div className="chat-avatar live" style={{ "--accent": AGENTS[activeLine.speaker].color }}>
+                  <img src={rightCard?.poster ?? rightCard?.image} alt={activeLine.speaker} />
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
-        <DebatePortrait
-          agentName={activeDebateRoster[1]}
-          card={getRosterEntry(activeDebateRoster[1])}
-          speaking={activeLine?.speaker === activeDebateRoster[1]}
-        />
+        <DebatePortrait agentName={activeDebateRoster[1]} card={rightCard} speaking={activeLine?.speaker === activeDebateRoster[1]} />
       </div>
       {browserFallback ? (
         <div className="browser-fallback-badge" role="status" aria-live="polite">
