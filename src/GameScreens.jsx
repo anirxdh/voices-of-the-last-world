@@ -291,7 +291,7 @@ export function SelectionScreen({ operatorLabel, selectedScenario, roster, selec
         <p className="selection-kicker">
           {operatorLabel} // {selectedScenario.scenario_title}
         </p>
-        <h2>Select The Characters For This Scenario</h2>
+        <h2>Choose 2 minds for this scenario</h2>
       </div>
       <div className="selection-grid selection-grid-visual">
         {roster.map((character) => {
@@ -479,7 +479,7 @@ export function DebateScreen({
               ) : null}
             </div>
           ) : null}
-          {debateStage === "strategy" ? (
+          {debateStage === "strategy" && !decisionBusy ? (
             <div className="inline-decision-panel compact inline-thread-panel">
               <div className="inline-decision-copy">
                 <span className="mission-focus-label">Pick a move</span>
@@ -503,7 +503,7 @@ export function DebateScreen({
               </div>
             </div>
           ) : null}
-          {debateStage === "tool" ? (
+          {debateStage === "tool" && !decisionBusy ? (
             <div className="inline-decision-panel compact inline-thread-panel">
               <div className="inline-decision-copy">
                 <span className="mission-focus-label">Pick a tool</span>
@@ -527,7 +527,7 @@ export function DebateScreen({
               </div>
             </div>
           ) : null}
-          {debateStage === "execute" ? (
+          {debateStage === "execute" && !decisionBusy ? (
             <div className="inline-decision-panel compact inline-thread-panel">
               <div className="inline-decision-copy">
                 <span className="mission-focus-label">Pick a finish</span>
