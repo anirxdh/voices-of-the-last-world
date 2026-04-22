@@ -117,6 +117,7 @@ let activeAudio = null;
 let activeObjectUrl = null;
 let activeAudioContext = null;
 let activeSourceNode = null;
+let activeGainNode = null;
 let runtimeApiKey = "";
 
 function getApiKey() {
@@ -187,10 +188,16 @@ export function stopVoicePlayback() {
     activeSourceNode = null;
   }
 
-  if (activeAudioContext) {
-    activeAudioContext.close().catch(() => {});
-    activeAudioContext = null;
+  if (activeGainNode) {
+    try {
+      activeGainNode.disconnect();
+    } catch {}
+    activeGainNode = null;
   }
+
+  // Do not close the AudioContext here.
+  // On mobile browsers (notably iOS Safari) audio playback often stays "unlocked"
+  // only while a single AudioContext remains alive after the user's first gesture.
 
   if (activeObjectUrl) {
     URL.revokeObjectURL(activeObjectUrl);
@@ -200,6 +207,107 @@ export function stopVoicePlayback() {
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
+}
+
+async function getOrCreateUnlockedAudioContext() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+
+  if (!activeAudioContext) {
+    activeAudioContext = new AudioCtx();
+  }
+
+  try {
+    if (activeAudioContext.state === "suspended") {
+      await activeAudioContext.resume();
+    }
+  } catch {
+    return null;
+  }
+
+  return activeAudioContext;
+}
+
+async function playWithWebAudio(agentName, blob, fallbackText) {
+  const normalizedName = normalizeAgentName(agentName);
+  const ctx = await getOrCreateUnlockedAudioContext();
+  if (!ctx) {
+    await playWithBrowserVoice(normalizedName, fallbackText);
+    return { provider: "browser", reason: "playback_failed" };
+  }
+
+  let buffer;
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    buffer = await ctx.decodeAudioData(arrayBuffer);
+  } catch {
+    await playWithBrowserVoice(normalizedName, fallbackText);
+    return { provider: "browser", reason: "playback_failed" };
+  }
+
+  // Stop any existing playback nodes but keep the context alive (important for mobile).
+  if (activeSourceNode) {
+    try {
+      activeSourceNode.disconnect();
+    } catch {}
+    activeSourceNode = null;
+  }
+  if (activeGainNode) {
+    try {
+      activeGainNode.disconnect();
+    } catch {}
+    activeGainNode = null;
+  }
+
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  activeSourceNode = source;
+
+  const gain = ctx.createGain();
+  gain.gain.value = 1;
+  activeGainNode = gain;
+
+  let outputNode = source;
+
+  if (normalizedName === "Core AI") {
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 1320;
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = "highpass";
+    highpass.frequency.value = 260;
+    const notch = ctx.createBiquadFilter();
+    notch.type = "notch";
+    notch.frequency.value = 920;
+    notch.Q.value = 2.8;
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -30;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 14;
+    compressor.attack.value = 0.001;
+    compressor.release.value = 0.06;
+
+    outputNode.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(notch);
+    notch.connect(compressor);
+    compressor.connect(gain);
+  } else {
+    outputNode.connect(gain);
+  }
+
+  gain.connect(ctx.destination);
+
+  await new Promise((resolve) => {
+    source.onended = resolve;
+    try {
+      source.start(0);
+    } catch {
+      resolve();
+    }
+  });
+
+  return { provider: "elevenlabs" };
 }
 
 export function setElevenLabsApiKey(apiKey) {
@@ -296,71 +404,5 @@ export async function speakAgentLine(agentName, text) {
   }
 
   const blob = await response.blob();
-  stopVoicePlayback();
-  const url = URL.createObjectURL(blob);
-  activeObjectUrl = url;
-  const audio = new Audio(url);
-  activeAudio = audio;
-  let fallbackReason = "";
-  await new Promise((resolve) => {
-    audio.onended = resolve;
-    audio.onerror = resolve;
-    if (normalizedName === "Core AI") {
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioCtx();
-        activeAudioContext = ctx;
-        const source = ctx.createMediaElementSource(audio);
-        activeSourceNode = source;
-        const lowpass = ctx.createBiquadFilter();
-        lowpass.type = "lowpass";
-        lowpass.frequency.value = 1320;
-        const highpass = ctx.createBiquadFilter();
-        highpass.type = "highpass";
-        highpass.frequency.value = 260;
-        const notch = ctx.createBiquadFilter();
-        notch.type = "notch";
-        notch.frequency.value = 920;
-        notch.Q.value = 2.8;
-        const compressor = ctx.createDynamicsCompressor();
-        compressor.threshold.value = -30;
-        compressor.knee.value = 14;
-        compressor.ratio.value = 14;
-        compressor.attack.value = 0.001;
-        compressor.release.value = 0.06;
-        const gain = ctx.createGain();
-        gain.gain.value = 0.92;
-        source.connect(highpass);
-        highpass.connect(lowpass);
-        lowpass.connect(notch);
-        notch.connect(compressor);
-        compressor.connect(gain);
-        gain.connect(ctx.destination);
-        audio.preservesPitch = false;
-        audio.playbackRate = 0.92;
-        audio.play().catch(async () => {
-          console.warn(`⚠️ [BROWSER FALLBACK] ${normalizedName}: AudioContext play failed`);
-          fallbackReason = "playback_failed";
-          await playWithBrowserVoice(normalizedName, text);
-          resolve();
-        });
-      } catch {
-        audio.play().catch(async () => {
-          console.warn(`⚠️ [BROWSER FALLBACK] ${normalizedName}: audio.play() failed`);
-          fallbackReason = "playback_failed";
-          await playWithBrowserVoice(normalizedName, text);
-          resolve();
-        });
-      }
-      return;
-    }
-
-    audio.play().catch(async () => {
-      console.warn(`⚠️ [BROWSER FALLBACK] ${normalizedName}: audio.play() failed`);
-      fallbackReason = "playback_failed";
-      await playWithBrowserVoice(normalizedName, text);
-      resolve();
-    });
-  });
-  return fallbackReason ? { provider: "browser", reason: fallbackReason } : { provider: "elevenlabs" };
+  return await playWithWebAudio(normalizedName, blob, text);
 }
